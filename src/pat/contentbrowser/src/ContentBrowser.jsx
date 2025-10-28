@@ -108,6 +108,7 @@ export default function ContentBrowser() {
     const [showBrowser, setShowBrowser] = useContext(ShowBrowserContext);
 
     const store = useContentStore(config);
+    const fetchLevels = store.get;
     const columnsRef = useRef(null);
     const [previewItem, setPreviewItem] = useState(null);
     const [searchValue, setSearchValue] = useState("");
@@ -129,8 +130,8 @@ export default function ContentBrowser() {
         if (!showBrowser) {
             return;
         }
-        store.get({ path: currentPath });
-    }, [showBrowser, currentPath, store]);
+        fetchLevels({ path: currentPath });
+    }, [showBrowser, currentPath, fetchLevels]);
 
     useEffect(() => {
         if (!columnsRef.current) {
@@ -335,13 +336,17 @@ export default function ContentBrowser() {
                 if (defaultModeRef.current === "browse") {
                     setConfig((prev) => ({ ...prev, mode: value ? "search" : "browse" }));
                 }
-                await store.get({ path: currentPath, searchTerm: value, mode: value ? "search" : defaultModeRef.current });
+                await fetchLevels({
+                    path: currentPath,
+                    searchTerm: value,
+                    mode: value ? "search" : defaultModeRef.current,
+                });
                 if (!value) {
                     setPreviewItem(null);
                     setPreviewUids([]);
                 }
             }, 250),
-        [currentPath, setConfig, store, setPreviewUids],
+        [currentPath, setConfig, fetchLevels, setPreviewUids],
     );
 
     const filterLevel = useMemo(
@@ -350,9 +355,9 @@ export default function ContentBrowser() {
                 if (value === "") {
                     setPreviewUids([]);
                 }
-                store.get({ path: currentPath, searchTerm: value, updateCache: true });
+                fetchLevels({ path: currentPath, searchTerm: value, updateCache: true });
             }, 250),
-        [currentPath, store, setPreviewUids],
+        [currentPath, fetchLevels, setPreviewUids],
     );
 
     useEffect(() => {
@@ -514,7 +519,7 @@ export default function ContentBrowser() {
                                             <LoadMoreSentinel
                                                 level={level}
                                                 onVisible={() =>
-                                                    store.get({
+                                                    fetchLevels({
                                                         loadMorePath: level.path,
                                                         page: (level.page || 1) + 1,
                                                         searchTerm: level.searchTerm,
