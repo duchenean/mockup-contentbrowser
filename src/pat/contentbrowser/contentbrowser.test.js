@@ -1,31 +1,31 @@
-import "./contentbrowser";
-import registry from "@patternslib/patternslib/src/core/registry";
-import utils from "@patternslib/patternslib/src/core/utils";
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import App from "./contentbrowser";
 
-
-describe("Content Browser", () => {
+describe("Content Browser (React)", () => {
     beforeEach(() => {
-        let options = {
-            vocabularyUrl: "/contentbrowser-test.json",
-        }
-        document.body.innerHTML = `
-            <div id="contentbrowser-field">
-                <input type="text" value="" class="pat-contentbrowser" data-pat-contentbrowser="${JSON.stringify(options)}">
-            </div>
-        `;
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                results: [
+                    {
+                        UID: "uid-1",
+                        Title: "Document 1",
+                        path: "/documents/doc-1",
+                        portal_type: "Document",
+                    },
+                ],
+                total: 1,
+            }),
+        });
     });
 
     afterEach(() => {
-        document.body.innerHTML = "";
+        jest.resetAllMocks();
     });
 
-    it.skip("create contentbrowser pattern without preselection", async function () {
-        expect(document.querySelectorAll(".content-browser-wrapper").length).toEqual(0);
-
-        registry.scan(document.body);
-        await utils.timeout(1);
-
-        expect(document.querySelectorAll(".content-browser-wrapper").length).toEqual(1);
+    it.skip("renders initial selection", async () => {
+        render(<App vocabularyUrl="/mock" selection={["uid-1"]} />);
+        expect(await screen.findByText("Document 1")).toBeInTheDocument();
     });
-
 });

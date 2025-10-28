@@ -1,236 +1,345 @@
-import logger from "@patternslib/patternslib/src/core/logging";
-import utils from "../../../core/utils.js";
-import I18n from "../../../core/i18n.js";
+import { useEffect } from "react";
 
-const log = logger.getLogger("pat-contentbrowser");
+/**
+ * Minimal local storage helper that works in both browser and test
+ * environments.
+ */
+const storage = {
+    get(key) {
+        if (typeof window === "undefined" || !window.localStorage) {
+            return [];
+        }
+        try {
+            const raw = window.localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : [];
+        } catch (err) {
+            console.warn("pat-contentbrowser: failed to read localStorage", err);
+            return [];
+        }
+    },
+    set(key, value) {
+        if (typeof window === "undefined" || !window.localStorage) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(key, JSON.stringify(value));
+        } catch (err) {
+            console.warn("pat-contentbrowser: failed to write localStorage", err);
+        }
+    },
+};
 
-export async function request({
-    method = "GET",
-    vocabularyUrl = null,
-    attributes = [],
-    path = null,
-    uids = null,
-    searchTerm = null,
-    searchIndex = "SearchableText",
-    searchPath = null,
-    levelInfoPath = null,
-    selectableTypes = [],
-    pageSize = 100,
-    sortOn = 'sortable_title',
-    sortOrder = 'ascending',
-    page = 1,
+function ensureURL(url) {
+    if (!url) {
+        return new URL("/", "http://localhost");
+    }
+    try {
+        return new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    } catch (err) {
+        return new URL("/", "http://localhost");
+    }
+}
+
+function buildQueryURL({
+    vocabularyUrl,
+    attributes,
+    path,
+    uids,
+    searchTerm,
+    searchIndex,
+    searchPath,
+    levelInfoPath,
+    selectableTypes,
+    pageSize,
+    sortOn,
+    sortOrder,
+    page,
 }) {
-    let vocabQuery = {
+    const baseURL = ensureURL(vocabularyUrl);
+    const query = {
         criteria: [],
     };
+
     if (path) {
-        // query sublevel of path
-        vocabQuery = {
-            criteria: [
-                {
-                    i: "path",
-                    o: "plone.app.querystring.operation.string.path",
-                    v: `${path}::1`,
-                },
-            ],
-            sort_on: sortOn,
-            sort_order: sortOrder,
-        };
+        query.criteria.push({
+            i: "path",
+            o: "plone.app.querystring.operation.string.path",
+            v: `${path}::1`,
+        });
     }
+
     if (levelInfoPath) {
-        // query exact path
-        vocabQuery = {
-            criteria: [
-                {
-                    i: "path",
-                    o: "plone.app.querystring.operation.string.path",
-                    v: `${levelInfoPath}::0`,
-                },
-            ],
-        };
+        query.criteria = [
+            {
+                i: "path",
+                o: "plone.app.querystring.operation.string.path",
+                v: `${levelInfoPath}::0`,
+            },
+        ];
     }
+
     if (searchPath) {
-        // search from searchPath down
-        vocabQuery = {
-            criteria: [
-                {
-                    i: "path",
-                    o: "plone.app.querystring.operation.string.path",
-                    v: searchPath,
-                },
-            ],
-        };
-        if (selectableTypes.length) {
-            vocabQuery.criteria.push({
+        query.criteria.push({
+            i: "path",
+            o: "plone.app.querystring.operation.string.path",
+            v: searchPath,
+        });
+        if (selectableTypes && selectableTypes.length) {
+            query.criteria.push({
                 i: "portal_type",
                 o: "plone.app.querystring.operation.list.contains",
                 v: selectableTypes,
-            })
+            });
         }
     }
+
     if (uids) {
-        vocabQuery = {
-            criteria: [
-                {
-                    i: "UID",
-                    o: "plone.app.querystring.operation.list.contains",
-                    v: uids,
-                },
-            ],
-        };
+        query.criteria = [
+            {
+                i: "UID",
+                o: "plone.app.querystring.operation.list.contains",
+                v: uids,
+            },
+        ];
     }
+
     if (searchTerm) {
-        vocabQuery.criteria.push({
-            i: searchIndex,
+        query.criteria.push({
+            i: searchIndex || "SearchableText",
             o: "plone.app.querystring.operation.string.contains",
             v: searchTerm,
-
-        })
+        });
     }
 
-    if (!vocabQuery.criteria.length) {
-        return {
-            results: [],
-            total: 0,
-        }
-    };
+    if (!query.criteria.length) {
+        return null;
+    }
 
-    const url_query = JSON.stringify(vocabQuery);
-    const url_parameters = JSON.stringify(attributes);
-    const url_batch = pageSize ? JSON.stringify({
-        page: page,
-        size: pageSize,
-    }) : "";
+    const params = new URLSearchParams();
+    params.set("query", JSON.stringify(query));
+    params.set("attributes", JSON.stringify(attributes || []));
+    if (pageSize) {
+        params.set("batch", JSON.stringify({ page, size: pageSize }));
+    }
+    if (!path && !levelInfoPath) {
+        if (sortOn) params.set("sort_on", sortOn);
+        if (sortOrder) params.set("sort_order", sortOrder);
+    }
+    baseURL.search = params.toString();
+    return baseURL;
+}
 
-    let url = encodeURI(`${vocabularyUrl}${vocabularyUrl.indexOf("?") !== -1 ? "&" : "?"}query=${url_query}&attributes=${url_parameters}` + (url_batch ? `&batch=${url_batch}` : ""));
+export async function request({
+    method = "GET",
+    vocabularyUrl,
+    attributes = [],
+    path,
+    uids,
+    searchTerm,
+    searchIndex = "SearchableText",
+    searchPath,
+    levelInfoPath,
+    selectableTypes = [],
+    pageSize = 100,
+    sortOn = "sortable_title",
+    sortOrder = "ascending",
+    page = 1,
+}) {
+    const url = buildQueryURL({
+        vocabularyUrl,
+        attributes,
+        path,
+        uids,
+        searchTerm,
+        searchIndex,
+        searchPath,
+        levelInfoPath,
+        selectableTypes,
+        pageSize,
+        sortOn,
+        sortOrder,
+        page,
+    });
+
+    if (!url) {
+        return { results: [], total: 0 };
+    }
 
     const headers = new Headers();
     headers.set("Accept", "application/json");
+    let body;
 
-    let request_params = {
-        method: method,
-        headers: headers,
-    };
-
-    if (method == "POST" && url.indexOf("?") !== -1) {
-        const url_parts = url.split("?");
-        url = url_parts[0];
-        const post_data = url_parts[1];
+    if (method === "POST") {
         headers.set("Content-Type", "application/x-www-form-urlencoded");
-
-        log.debug(url, post_data);
-
-        request_params['body'] = post_data;
+        body = url.searchParams.toString();
+        url.search = "";
     }
 
-    const response = await fetch(url, request_params);
+    const response = await fetch(url.toString(), {
+        method,
+        headers,
+        body,
+    });
 
     if (!response.ok) {
-        return {
-            results: [],
-            total: 0,
-            errors: response.errors,
-        };
+        const error = new Error(`Request failed with status ${response.status}`);
+        error.status = response.status;
+        throw error;
     }
 
     return await response.json();
 }
 
-export async function get_items_from_uids(uids, config) {
-    if (!uids) {
+export async function getItemsFromUids(uids, config) {
+    if (!uids || !uids.length) {
         return [];
     }
-    const selectedItemsFromUids = await request({
-        // use POST request (when many selected items are present the URL might get too long)
+    const response = await request({
         method: "POST",
         vocabularyUrl: config.vocabularyUrl,
         attributes: config.attributes,
-        uids: uids,
-        // do not batch here, otherwise we do not get all items
+        uids,
         pageSize: null,
     });
-    let results = (await selectedItemsFromUids?.results) || [];
-    // resort the results based on the order of uids
-    results.sort((a, b) => {
-        return uids.indexOf(a.UID) - uids.indexOf(b.UID);
-    })
+    const results = response?.results || [];
+    results.sort((a, b) => uids.indexOf(a.UID) - uids.indexOf(b.UID));
     return results;
 }
 
-
-/** use Plone resolveIcon to load a SVG icon and replace node with icon code */
-
-export async function iconTag(iconName) {
-    const icon = await utils.resolveIcon(iconName);
-    return icon;
-}
-
-export async function resolveIcon(node, { iconName }) {
-    const iconCode = await iconTag(iconName);
-    node.outerHTML = iconCode;
-    return {
-        destroy() { },
-    };
-}
-
-/** Dispatch event on click outside of node */
-export function clickOutside(node) {
-    const handleClick = (event) => {
-        if (node && !node.contains(event.target)) {
-            node.dispatchEvent(new CustomEvent("click_outside", node));
-        }
-    };
-
-    document.addEventListener("click", handleClick, true);
-
-    return {
-        destroy() {
-            document.removeEventListener("click", handleClick, true);
-        },
-    };
-}
-
-export function recentlyUsedItems(filterItems, config) {
-    let ret = utils.storage.get(config.recentlyUsedKey) || [];
-    // hard-limit to 1000 entries
-    ret = ret.slice(ret.length - 1000, ret.length);
-    if (filterItems && config?.selectableTypes.length) {
-        ret = ret.filter((it) => {
-            return config.selectableTypes.indexOf(it.portal_type) != -1;
-        });
+export function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
     }
-    // max is applied AFTER filtering selectable items.
-    const max = parseInt(config.recentlyUsedMaxItems, 20);
-    if (max) {
-        // return the slice from the end, as we want to display newest items first.
-        ret = ret.slice(ret.length - max, ret.length);
+    const locale = typeof navigator !== "undefined" && navigator.language ? navigator.language : "en";
+    return date.toLocaleString(locale);
+}
+
+export function recentlyUsedItems(filterSelectable, config) {
+    if (!config.recentlyUsed || !config.recentlyUsedKey) {
+        return [];
     }
-    return ret;
+    let items = storage.get(config.recentlyUsedKey) || [];
+    items = items.slice(Math.max(items.length - 1000, 0));
+    if (filterSelectable && config.selectableTypes?.length) {
+        items = items.filter((item) => config.selectableTypes.includes(item.portal_type));
+    }
+    const limit = parseInt(config.recentlyUsedMaxItems, 10);
+    if (limit) {
+        items = items.slice(Math.max(items.length - limit, 0));
+    }
+    return items;
 }
 
 export function updateRecentlyUsed(item, config) {
-    if (!config.recentlyUsed) {
+    if (!config.recentlyUsed || !config.recentlyUsedKey || !item) {
         return;
     }
-    // add to recently added items
-    const recentlyUsed = recentlyUsedItems(false, config); // do not filter for selectable but get all. append to that list the new item.
-    const alreadyPresent = recentlyUsed.filter((it) => {
-        return it.UID === item.UID;
-    });
-    if (alreadyPresent.length > 0) {
-        recentlyUsed.splice(recentlyUsed.indexOf(alreadyPresent[0]), 1);
+    const items = recentlyUsedItems(false, config);
+    const existingIndex = items.findIndex((it) => it.UID === item.UID);
+    if (existingIndex !== -1) {
+        items.splice(existingIndex, 1);
     }
-    recentlyUsed.push(item);
-    utils.storage.set(config.recentlyUsedKey, recentlyUsed);
+    items.push(item);
+    storage.set(config.recentlyUsedKey, items);
 }
 
-
-export function formatDate(dateval) {
-    // fix underscore replacement by /mockup/src/core/i18n.js
-    // the "wrong" fix in i18n.js exists for use by select2 and tinymce
-    // this fix should be moved to the mockup modules of tinymce and select
-    // see: https://github.com/plone/mockup/issues/1429
-    const d = Date.parse(dateval);
-    const i18n = new I18n();
-    return new Date(d).toLocaleString(i18n.currentLanguage.replace("_", "-"));
+export function debounce(fn, delay = 300) {
+    let handle;
+    return (...args) => {
+        window.clearTimeout(handle);
+        handle = window.setTimeout(() => fn(...args), delay);
+    };
 }
+
+export function useClickOutside(ref, handler) {
+    useEffect(() => {
+        const listener = (event) => {
+            if (!ref.current || ref.current.contains(event.target)) {
+                return;
+            }
+            handler(event);
+        };
+        document.addEventListener("mousedown", listener, true);
+        document.addEventListener("touchstart", listener, true);
+        return () => {
+            document.removeEventListener("mousedown", listener, true);
+            document.removeEventListener("touchstart", listener, true);
+        };
+    }, [ref, handler]);
+}
+
+export function clampPageSize(total, pageSize, page) {
+    const maxPages = pageSize ? Math.ceil(total / pageSize) : 1;
+    return Math.min(page, maxPages);
+}
+
+export function normalizePath(value) {
+    if (!value) return "/";
+    if (value === "/") return "/";
+    return value.replace(/\/+$/, "");
+}
+
+export function isFolderish(item) {
+    return !!item?.is_folderish;
+}
+
+export function itemIdentifier(item) {
+    if (!item || !item.path) {
+        return "-";
+    }
+    const parts = item.path.split("/");
+    return parts[parts.length - 1] || parts[parts.length - 2] || parts[0];
+}
+
+export function reorder(list, startIndex, endIndex) {
+    const result = Array.from(list);
+    const [removed] = result.splice(startIndex, 1);
+    result.splice(endIndex, 0, removed);
+    return result;
+}
+
+export function flattenPreview(items) {
+    return items.map((item) => item.UID);
+}
+
+export function ensureArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    return [value];
+}
+
+export function guessIconName(portal_type = "") {
+    const type = portal_type.toLowerCase();
+    if (type.includes("folder")) return "folder";
+    if (type.includes("image")) return "image";
+    if (type.includes("link")) return "link";
+    if (type.includes("file")) return "file";
+    return "document";
+}
+
+export function createBatchInfo(level, pageSize) {
+    return {
+        hasMore: pageSize ? level.total > pageSize * (level.page || 1) : false,
+        nextPage: (level.page || 1) + 1,
+    };
+}
+
+export default {
+    request,
+    getItemsFromUids,
+    formatDate,
+    recentlyUsedItems,
+    updateRecentlyUsed,
+    debounce,
+    useClickOutside,
+    clampPageSize,
+    normalizePath,
+    isFolderish,
+    itemIdentifier,
+    reorder,
+    flattenPreview,
+    ensureArray,
+    guessIconName,
+    createBatchInfo,
+};
