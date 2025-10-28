@@ -1,1 +1,0 @@
-//module.exports = "{{ page.filePathStem | replace('/README/', '/') }}/index.html"
